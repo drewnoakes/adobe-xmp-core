@@ -35,6 +35,7 @@ import com.adobe.xmp.XMPMeta;
 import com.adobe.xmp.options.ParseOptions;
 
 
+
 /**
  * This class replaces the <code>ExpatAdapter.cpp</code> and does the
  * XML-parsing and fixes the prefix. After the parsing several normalisations
@@ -186,6 +187,18 @@ public class XMPMetaParser
 		InputSource source = new InputSource(buffer.getByteStream());
 		try
 		{
+			if (options.getDisallowDoctype())
+			{
+				try
+				{
+				    factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+				}
+				catch(Throwable e)
+				{
+				    
+				}
+			}
+			
 			return parseInputSource(source);
 		}
 		catch (XMPException e)
@@ -241,6 +254,19 @@ public class XMPMetaParser
 		InputSource source = new InputSource(new StringReader(input));
 		try
 		{
+			if (options.getDisallowDoctype())
+			{
+				try
+				{
+					factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+				}
+				catch(Throwable e)
+				{
+					    
+				}
+			}
+			source = new InputSource(new StringReader(input));
+			
 			return parseInputSource(source);
 		}
 		catch (XMPException e)
@@ -400,6 +426,36 @@ public class XMPMetaParser
 			// honor System parsing limits, e.g.
 			// System.setProperty("entityExpansionLimit", "10");
 			factory.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true);
+			
+			String FEATURE = "http://apache.org/xml/features/disallow-doctype-decl";
+            factory.setFeature(FEATURE, true);
+
+            // If you can't completely disable DTDs, then at least do the following:
+            // Xerces 1 - http://xerces.apache.org/xerces-j/features.html#external-general-entities
+            // Xerces 2 - http://xerces.apache.org/xerces2-j/features.html#external-general-entities
+            // JDK7+ - http://xml.org/sax/features/external-general-entities    
+            FEATURE = "http://xml.org/sax/features/external-general-entities";
+            factory.setFeature(FEATURE, false);
+            
+            FEATURE = "http://xerces.apache.org/xerces2-j/features.html#disallow-doctype-decl";
+            factory.setFeature(FEATURE, false);
+
+            // Xerces 1 - http://xerces.apache.org/xerces-j/features.html#external-parameter-entities
+            // Xerces 2 - http://xerces.apache.org/xerces2-j/features.html#external-parameter-entities
+            // JDK7+ - http://xml.org/sax/features/external-parameter-entities    
+            FEATURE = "http://xml.org/sax/features/external-parameter-entities";
+            factory.setFeature(FEATURE, false);
+            
+            FEATURE = "http://xerces.apache.org/xerces2-j/features.html#external-parameter-entities";
+            factory.setFeature(FEATURE, false);
+
+            // Disable external DTDs as well
+            FEATURE = "http://apache.org/xml/features/nonvalidating/load-external-dtd";
+            factory.setFeature(FEATURE, false);
+
+            // and these as well, per Timothy Morgan's 2014 paper: "XML Schema, DTD, and Entity Attacks" (see reference below)
+            factory.setXIncludeAware(false);
+            factory.setExpandEntityReferences(false);
 		}
 		catch (Exception e)
 		{

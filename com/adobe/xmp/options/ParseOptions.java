@@ -31,6 +31,9 @@ public final class ParseOptions extends Options
 	public static final int ACCEPT_LATIN_1 = 0x0010;
 	/** Do not carry run the XMPNormalizer on a packet, leave it as it is. */
 	public static final int OMIT_NORMALIZATION = 0x0020;
+	/** Disallow DOCTYPE declarations to prevent entity expansion attacks.
+	 *  <em>Note:</em> Slight performance loss when set */
+	public static final int DISALLOW_DOCTYPE = 0x0040;
 
 	
 	/**
@@ -38,7 +41,7 @@ public final class ParseOptions extends Options
 	 */
 	public ParseOptions()
 	{
-		setOption(FIX_CONTROL_CHARS | ACCEPT_LATIN_1, true);
+		setOption(FIX_CONTROL_CHARS | ACCEPT_LATIN_1 | DISALLOW_DOCTYPE, true);
 	}
 	
 	
@@ -131,6 +134,17 @@ public final class ParseOptions extends Options
 	}
 
 	
+	public ParseOptions setDisallowDoctype(boolean value)
+	{
+		setOption(DISALLOW_DOCTYPE, value);
+		return this;
+	}
+	
+	public boolean getDisallowDoctype() {
+		
+		return getOption(DISALLOW_DOCTYPE);
+	}
+	
 	/**
 	 * @param value the value to set
 	 * @return Returns the instance to call more set-methods.
@@ -154,6 +168,7 @@ public final class ParseOptions extends Options
 			case FIX_CONTROL_CHARS:		return "FIX_CONTROL_CHARS";
 			case ACCEPT_LATIN_1:		return "ACCEPT_LATIN_1";
 			case OMIT_NORMALIZATION:	return "OMIT_NORMALIZATION";
+			case DISALLOW_DOCTYPE:		return "DISALLOW_DOCTYPE";
 			default: 					return null;
 		}
 	}
@@ -169,6 +184,8 @@ public final class ParseOptions extends Options
 			STRICT_ALIASING |
 			FIX_CONTROL_CHARS |
 			ACCEPT_LATIN_1 |
-			OMIT_NORMALIZATION;
+			OMIT_NORMALIZATION |
+			DISALLOW_DOCTYPE;
 	}
+
 }
