@@ -465,7 +465,39 @@ public class XMPMetaParser
 
 		try
 		{
-			factory.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true);
+			String FEATURE = "http://apache.org/xml/features/disallow-doctype-decl";
+			factory.setFeature(FEATURE, true);
+			// If you can't completely disable DTDs, then at least do the
+			// following:
+			// Xerces 1 -
+			// http://xerces.apache.org/xerces-j/features.html#external-general-entities
+			// Xerces 2 -
+			// http://xerces.apache.org/xerces2-j/features.html#external-general-entities
+			// JDK7+ - http://xml.org/sax/features/external-general-entities
+			FEATURE = "http://xml.org/sax/features/external-general-entities";
+			factory.setFeature(FEATURE, false);
+			FEATURE = "http://xerces.apache.org/xerces2-j/features.html#disallow-doctype-decl";
+			factory.setFeature(FEATURE, false);
+
+			// Xerces 1 -
+			// http://xerces.apache.org/xerces-j/features.html#external-parameter-entities
+			// Xerces 2 -
+			// http://xerces.apache.org/xerces2-j/features.html#external-parameter-entities
+			// JDK7+ - http://xml.org/sax/features/external-parameter-entities
+			FEATURE = "http://xml.org/sax/features/external-parameter-entities";
+			factory.setFeature(FEATURE, false);
+
+			FEATURE = "http://xerces.apache.org/xerces2-j/features.html#external-parameter-entities";
+			factory.setFeature(FEATURE, false);
+
+			// Disable external DTDs as well
+			FEATURE = "http://apache.org/xml/features/nonvalidating/load-external-dtd";
+			factory.setFeature(FEATURE, false);
+
+			// and these as well, per Timothy Morgan's 2014 paper: "XML Schema,
+			// DTD, and Entity Attacks" (see reference below)
+			factory.setXIncludeAware(false);
+			factory.setExpandEntityReferences(false);
 			
 		}
 		catch (Throwable e)
