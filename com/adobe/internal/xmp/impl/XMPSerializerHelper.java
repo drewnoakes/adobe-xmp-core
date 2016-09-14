@@ -77,7 +77,10 @@ public class XMPSerializerHelper
 	{
 		// forces the encoding to be UTF-16 to get the correct string length
 		options = options != null ? options : new SerializeOptions();
-		options.setEncodeUTF16BE(true);
+		// By default encoding is utf8
+		// options should be set by the client. Commenting setting utf16 option 
+		// so that users can get the string in whichever encoding they want (by setting the options bits)
+		// options.setEncodeUTF16BE(true); 
 
 		ByteArrayOutputStream out = new ByteArrayOutputStream(2048);
 		serialize(xmp, out, options);

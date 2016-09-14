@@ -1352,6 +1352,8 @@ public class XMPMetaImpl implements XMPMeta, XMPConst
 	void setNode(XMPNode node, Object value, PropertyOptions newOptions, boolean deleteExisting)
 			throws XMPException
 	{
+		int compositeMask = (PropertyOptions.ARRAY | PropertyOptions.ARRAY_ALT_TEXT | PropertyOptions.ARRAY_ALTERNATE
+								| PropertyOptions.ARRAY_ORDERED | PropertyOptions.STRUCT);
 		if (deleteExisting)
 		{
 			node.clear();
@@ -1360,7 +1362,7 @@ public class XMPMetaImpl implements XMPMeta, XMPConst
 		// its checked by setOptions(), if the merged result is a valid options set
 		node.getOptions().mergeWith(newOptions);
 
-		if (!node.getOptions().isCompositeProperty())
+		if ((node.getOptions().getOptions() & compositeMask) == 0) 
 		{
 			// This is setting the value of a leaf node.
 			XMPNodeUtils.setNodeValue(node, value);
@@ -1370,6 +1372,11 @@ public class XMPMetaImpl implements XMPMeta, XMPConst
 			if (value != null && value.toString().length() > 0)
 			{
 				throw new XMPException("Composite nodes can't have values", XMPError.BADXPATH);
+			}
+			if ((node.getOptions().getOptions() & compositeMask) != 0) {	// Can't change an array to a struct, or vice versa.
+				if ( (newOptions.getOptions() & compositeMask) != (node.getOptions().getOptions() & compositeMask) ) {
+					throw new XMPException( "Requested and existing composite form mismatch", XMPError.BADXPATH );
+				}
 			}
 
 			node.removeChildren();

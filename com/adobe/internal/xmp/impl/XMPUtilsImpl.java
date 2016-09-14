@@ -880,6 +880,7 @@ public class XMPUtilsImpl implements XMPConst
 		XMPNode sourceNode = null;
 		XMPNode destNode = null;
 		
+		ParameterAsserts.assertNotNull(source);
 		ParameterAsserts.assertSchemaNS(sourceNS);
 		ParameterAsserts.assertSchemaNS(sourceRoot);
 		ParameterAsserts.assertNotNull(dest);
@@ -920,7 +921,7 @@ public class XMPUtilsImpl implements XMPConst
 					destNode.removeChildren();
 				}
 				else{
-					throw new XMPException("Destination must be an existing struct", XMPError.BADXPATH);
+					throw new XMPException("Destination must be an empty struct", XMPError.BADXPATH);
 				}
 			}
 			
@@ -1623,7 +1624,7 @@ public class XMPUtilsImpl implements XMPConst
 		XMPMetaImpl stdXMP = new XMPMetaImpl();
 		XMPMetaImpl extXMP = new XMPMetaImpl();
 		SerializeOptions keepItSmall = new SerializeOptions(SerializeOptions.USE_COMPACT_FORMAT);
-		keepItSmall.setPadding(1);
+		keepItSmall.setPadding(0);
 		keepItSmall.setIndent("");
 		keepItSmall.setBaseIndent(0);
 		keepItSmall.setNewline(" ");

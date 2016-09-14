@@ -9,9 +9,11 @@
 
 package com.adobe.internal.xmp.impl;
 
+import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 
 import com.adobe.internal.xmp.XMPConst;
@@ -146,11 +148,36 @@ public class XMPNormalizer
 			{
 				// Do a special case fix for exif:GPSTimeStamp.
 				fixGPSTimeStamp(currSchema);
-				XMPNode arrayNode = XMPNodeUtils.findChildNode(currSchema, "exif:UserComment",
+				XMPNode userComment = XMPNodeUtils.findChildNode(currSchema, "exif:UserComment",
 						false);
-				if (arrayNode != null)
+				if (userComment != null)
 				{
-					repairAltText(arrayNode);
+					if(userComment.getOptions().isSimple()){
+						XMPNode newNode = new XMPNode(XMPConst.ARRAY_ITEM_NAME, userComment.getValue(),
+								userComment.getOptions());
+						newNode.setParent(userComment);
+						
+						int QualNo = userComment.getQualifierLength();
+						while(QualNo > 0){
+							newNode.addQualifier(userComment.getQualifier(userComment.getQualifierLength() - QualNo));
+							--QualNo;
+						}
+						
+						userComment.removeQualifiers();
+						if ( ! newNode.getOptions().getHasLanguage() )  {
+							XMPNode langQual = new XMPNode ( "xml:lang", "x-default", new PropertyOptions().setQualifier(true) );
+							newNode.addQualifier( langQual );
+							newNode.getOptions().setHasQualifiers(true);
+							newNode.getOptions().setHasLanguage(true);
+						}
+						userComment.addChild(newNode);
+						userComment.setOptions(new PropertyOptions(PropertyOptions.ARRAY | PropertyOptions.ARRAY_ORDERED
+								|PropertyOptions.ARRAY_ALT_TEXT | PropertyOptions.ARRAY_ALTERNATE));
+						userComment.setValue("");
+						
+						
+					}
+					repairAltText(userComment);
 				}
 			}
 			else if (XMPConst.NS_DM.equals(currSchema.getName()))
@@ -475,6 +502,8 @@ public class XMPNormalizer
 			{
 				otherDate = XMPNodeUtils.findChildNode(exifSchema, "exif:DateTimeDigitized", false);
 			}
+			if(otherDate == null)
+				return;
 
 			binOtherDate = XMPUtils.convertToDate(otherDate.getValue());
 			Calendar cal = binGPSStamp.getCalendar();
