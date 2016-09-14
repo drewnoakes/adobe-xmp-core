@@ -404,6 +404,7 @@ public final class PropertyOptions extends Options
 			ARRAY_ORDERED |
 			ARRAY_ALTERNATE |
 			ARRAY_ALT_TEXT |
+			DELETE_EXISTING |
 			SCHEMA_NODE;
 	}
 
@@ -415,18 +416,18 @@ public final class PropertyOptions extends Options
 	{
 		switch (option)
 		{
-			case URI : 				return "URI";
-			case HAS_QUALIFIERS :	return "HAS_QUALIFIER";
-			case QUALIFIER :		return "QUALIFIER";
-			case HAS_LANGUAGE :		return "HAS_LANGUAGE";
-			case HAS_TYPE:			return "HAS_TYPE";
-			case STRUCT :			return "STRUCT";
-			case ARRAY :			return "ARRAY";
-			case ARRAY_ORDERED :	return "ARRAY_ORDERED";
-			case ARRAY_ALTERNATE :	return "ARRAY_ALTERNATE";
-			case ARRAY_ALT_TEXT : 	return "ARRAY_ALT_TEXT";
-			case SCHEMA_NODE : 		return "SCHEMA_NODE";
-			default: 				return null;
+			case URI : 							return "URI";
+			case HAS_QUALIFIERS :				return "HAS_QUALIFIER";
+			case QUALIFIER :					return "QUALIFIER";
+			case HAS_LANGUAGE :					return "HAS_LANGUAGE";
+			case HAS_TYPE:						return "HAS_TYPE";
+			case STRUCT :						return "STRUCT";
+			case ARRAY :						return "ARRAY";
+			case ARRAY_ORDERED :				return "ARRAY_ORDERED";
+			case ARRAY_ALTERNATE :				return "ARRAY_ALTERNATE";
+			case ARRAY_ALT_TEXT : 				return "ARRAY_ALT_TEXT";
+			case SCHEMA_NODE : 					return "SCHEMA_NODE";
+			default: 							return null;
 		}
 	}
 

@@ -9,10 +9,12 @@
 
 package com.adobe.internal.xmp;
 
+import java.security.NoSuchAlgorithmException;
 import com.adobe.internal.xmp.impl.Base64;
 import com.adobe.internal.xmp.impl.ISO8601Converter;
 import com.adobe.internal.xmp.impl.XMPUtilsImpl;
 import com.adobe.internal.xmp.options.PropertyOptions;
+import com.adobe.internal.xmp.options.TemplateOptions;
 
 
 /**
@@ -505,13 +507,166 @@ public class XMPUtils
 			throw new XMPException("Invalid base64 string", XMPError.BADVALUE, e);
 		}
 	}
-
-// <#AdobePrivate>
+	
 	/**
-	 * ******************************************************************************
-	 * Note: This API is partially implemented, specific to DCX-Lib. This is only for 
-	 * internal use.
-	 * ******************************************************************************
+	 * creates XMP serializations appropriate for a JPEG file.
+	 *
+	 * The standard XMP in a JPEG file is limited to 64K bytes. This function
+	 * serializes the XMP metadata in an XMP object into a string of RDF . If
+	 * the data does not fit into the 64K byte limit, it creates a second packet
+	 * string with the extended data.
+	 *
+	 * @param origXMP
+	 *            The XMP object containing the metadata.
+	 *
+	 * @param stdStr
+	 *            A string builder object in which to return the full standard XMP
+	 *            packet.
+	 *
+	 * @param extStr
+	 *            A string builder object in which to return the serialized extended
+	 *            XMP, empty if not needed.
+	 *
+	 * @param digestStr
+	 *            A string builder object in which to return an MD5 digest of the
+	 *            serialized extended XMP, empty if not needed.
+	 * 
+	 * @throws NoSuchAlgorithmException if fail to find algorithm for MD5
+	 * @throws XMPException in case of internal error occurs.
+	 *
+	 */
+	
+	public static void packageForJPEG(XMPMeta origXMP,
+			StringBuilder stdStr,
+			StringBuilder extStr,
+			StringBuilder digestStr) throws NoSuchAlgorithmException, XMPException{
+		XMPUtilsImpl.packageForJPEG(origXMP,stdStr,extStr,digestStr);
+	}
+	
+	/**
+	 * merges standard and extended XMP retrieved from a JPEG file.
+	 *
+	 * When an extended partition stores properties that do not fit into the
+	 * JPEG file limitation of 64K bytes, this function integrates those
+	 * properties back into the same XMP object with those from the standard XMP
+	 * packet.
+	 *
+	 * @param fullXMP
+	 *            An XMP object which the caller has initialized from the
+	 *            standard XMP packet in a JPEG file. The extended XMP is added
+	 *            to this object.
+	 *
+	 * @param extendedXMP
+	 *            An XMP object which the caller has initialized from the
+	 *            extended XMP packet in a JPEG file.
+	 *
+	 * @throws XMPException
+	 *             in case of internal error occurs.
+	 */
+	
+	public static void mergeFromJPEG(XMPMeta fullXMP,
+			XMPMeta extendedXMP) throws XMPException{
+		XMPUtilsImpl.mergeFromJPEG(fullXMP,extendedXMP);
+	}
+	
+	/**
+	 * modifies a working XMP object according to a template object.
+	 *<p>
+	 * The XMP template can be used to add, replace or delete properties from
+	 * the working XMP object. The actions that you specify determine how the
+	 * template is applied. Each action can be applied individually or combined;
+	 * if you do not specify any actions, the properties and values in the
+	 * working XMP object do not change.
+	 *<p>
+	 * These actions are available:
+	 * <ul>
+	 * <li>Clear <code> CLEAR_UNNAMED_PROPERTIES </code> : Deletes top-level
+	 * properties. Any top-level property that is present in the template (even
+	 * with empty value) is retained. All other top-level properties in the
+	 * working object are deleted
+	 *
+	 * <li>Add <code> ADD_NEW_PROPERTIES </code>: Adds new properties to the
+	 * working object if the template properties have values. See additional
+	 * detail below.
+	 *
+	 * <li>Replace <code> REPLACE_EXISTING_PROPERTIES </code>: Replaces the
+	 * values of existing top-level properties in the working XMP if the value
+	 * forms match those in the template. Properties with empty values in the
+	 * template are ignored. If combined with Clear or Add actions, those take
+	 * precedence; values are cleared or added, rather than replaced.
+	 *
+	 * <li>Replace/Delete empty <code> REPLACE_WITH_DELETE_EMPTY </code>:
+	 * Replaces values in the same way as the simple Replace action, and also
+	 * deletes properties if the value in the template is empty. If combined
+	 * with Clear or Add actions, those take precedence; values are cleared or
+	 * added, rather than replaced.
+	 *
+	 * <li>Include internal <code> INCLUDE_INTERNAL_PROPERTIES </code>: Performs
+	 * specified action on internal properties as well as external properties.
+	 * By default, internal properties are ignored for all actions.
+	 * </ul><p>
+	 *
+	 * The Add behavior depends on the type of property:
+	 * <ul>
+	 * <li>If a top-level property is not in the working XMP, and has a value in
+	 * the template, the property and value are added. Empty properties are not
+	 * added.
+	 * <li>If a property is in both the working XMP and template, the value
+	 * forms must match, otherwise the template is ignored for that property.
+	 * <li>If a struct is present in both the working XMP and template, the
+	 * individual fields of the template struct are added as appropriate; that
+	 * is, the logic is recursively applied to the fields. Struct values are
+	 * equivalent if they have the same fields with equivalent values.
+	 * <li>If an array is present in both the working XMP and template, items
+	 * from the template are added if the value forms match. Array values match
+	 * if they have sets of equivalent items, regardless of order.
+	 * <li>Alt-text arrays use the \c xml:lang qualifier as a key, adding
+	 * languages that are missing.
+	 * </ul><p>
+	 * Array item checking is n-squared; this can be time-intensive if the
+	 * Replace option is not specified. Each source item is checked to see if it
+	 * already exists in the destination, without regard to order or duplicates.
+	 * Simple items are compared by value and <code> xml:lang </code> qualifier;
+	 * other qualifiers are ignored. Structs are recursively compared by field
+	 * names, without regard to field order. Arrays are compared by recursively
+	 * comparing all items.
+	 * 
+	 * @param workingXMP
+	 *            The destination XMP object.
+	 *
+	 * @param templateXMP
+	 *            The template to apply to the destination XMP object.
+	 *
+	 * @param options
+	 *            Option flags to control the copying. If none are specified,
+	 *            the properties and values in the working XMP do not change. A
+	 *            logical OR of these bit-flag constants:
+	 *            <ul>
+	 *            <li><code> CLEAR_UNNAMED_PROPERTIES </code> Delete anything
+	 *            that is not in the template
+	 *            <li><code> ADD_NEW_PROPERTIES </code> Add properties; see
+	 *            detailed description.
+	 *            <li><code> REPLACE_EXISTING_PROPERTIES </code> Replace the
+	 *            values of existing properties.
+	 *            <li><code> REPLACE_WITH_DELETE_EMPTY </code> Replace the
+	 *            values of existing properties and delete properties if the new
+	 *            value is empty.
+	 *            <li><code> INCLUDE_INTERNAL_PROPERTIES </code> Operate on
+	 *            internal properties as well as external properties.
+	 *            </ul>
+	 *
+	 * @throws XMPException
+	 *             in case of internal error occurs.
+	 */
+	
+	static public void applyTemplate ( XMPMeta workingXMP,
+			  XMPMeta templateXMP, TemplateOptions options)
+					  throws XMPException{
+		XMPUtilsImpl.applyTemplate(workingXMP,templateXMP,options);
+	}
+		
+
+	/**
 	 * 
 	 * Replicate a subtree from one XMP object into another, possibly at a
 	 * different location.
@@ -549,5 +704,4 @@ public class XMPUtils
 		XMPUtilsImpl.duplicateSubtree(source, dest, sourceNS, sourceRoot, destNS, destRoot, options);
 	}
 
-//	 </#AdobePrivate>
 }

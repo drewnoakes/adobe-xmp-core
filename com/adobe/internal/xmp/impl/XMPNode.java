@@ -414,14 +414,25 @@ class XMPNode implements Comparable
 			return Collections.EMPTY_LIST.iterator();
 		}
 	}
+	
+	/**
+	 * Performs a <b>deep clone</b> of the node and the complete subtree.
+	 * it will clone those nodes also which has empty child and empty value.
+	 * @see java.lang.Object#clone(), XMPNode#clone(boolean skipEmpty)
+	 */
+	
+	public Object clone(){
+		return this.clone(false);
+	}
 
 
 	/**
 	 * Performs a <b>deep clone</b> of the node and the complete subtree.
-	 *
+	 * if <code>skipEmpty</code> is true, it will not clone node which has empty child and empty value.
+	 * @param skipEmpty If true, it will not clone those nodes with empty value and empty childern
 	 * @see java.lang.Object#clone()
 	 */
-	public Object clone()
+	public Object clone(boolean skipEmpty)
 	{
 		PropertyOptions newOptions;
 		try
@@ -435,7 +446,11 @@ class XMPNode implements Comparable
 		}
 
 		XMPNode newNode = new XMPNode(name, value, newOptions);
-		cloneSubtree(newNode);
+		cloneSubtree(newNode, skipEmpty);
+		if(skipEmpty && (newNode.getValue() == null || newNode.getValue().length() == 0)
+				&&(! newNode.hasChildren())){
+			newNode = null;
+		}
 
 		return newNode;
 	}
@@ -446,21 +461,34 @@ class XMPNode implements Comparable
 	 * qualifier )into and add it to the destination node.
 	 *
 	 * @param destination the node to add the cloned subtree
+	 * @param skipEmpty If true, it will not clone nodes with empty values and empty childern
 	 */
-	public void cloneSubtree(XMPNode destination)
+	public void cloneSubtree(XMPNode destination, boolean skipEmpty)
 	{
 		try
 		{
 			for (Iterator it = iterateChildren(); it.hasNext();)
 			{
 				XMPNode child = (XMPNode) it.next();
-				destination.addChild((XMPNode) child.clone());
+				if(skipEmpty && (child.getValue() == null || child.getValue().length() == 0)
+						&& (!child.hasChildren()))
+					continue;
+				XMPNode childNode = (XMPNode) child.clone(skipEmpty);
+				if(childNode == null)
+					continue;
+				destination.addChild(childNode);
 			}
 
 			for (Iterator it = iterateQualifier(); it.hasNext();)
 			{
 				XMPNode qualifier = (XMPNode) it.next();
-				destination.addQualifier((XMPNode) qualifier.clone());
+				if(skipEmpty && (qualifier.getValue() == null || qualifier.getValue().length() == 0)
+						&& (!qualifier.hasChildren()))
+					continue;
+				XMPNode qualNode = (XMPNode) qualifier.clone(skipEmpty);
+				if(qualNode == null)
+					continue;
+				destination.addQualifier(qualNode);
 			}
 		}
 		catch (XMPException e)

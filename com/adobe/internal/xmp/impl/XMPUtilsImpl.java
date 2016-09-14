@@ -11,7 +11,13 @@
 
 package com.adobe.internal.xmp.impl;
 
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
 import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
 
 import com.adobe.internal.xmp.XMPConst;
 import com.adobe.internal.xmp.XMPError;
@@ -24,6 +30,7 @@ import com.adobe.internal.xmp.impl.xpath.XMPPath;
 import com.adobe.internal.xmp.impl.xpath.XMPPathParser;
 import com.adobe.internal.xmp.options.PropertyOptions;
 import com.adobe.internal.xmp.options.SerializeOptions;
+import com.adobe.internal.xmp.options.TemplateOptions;
 import com.adobe.internal.xmp.properties.XMPAliasInfo;
 
 
@@ -576,7 +583,7 @@ public class XMPUtilsImpl implements XMPConst
 						|| !Utils.isInternalProperty(sourceSchema.getName(), sourceProp.getName()))
 				{
 					appendSubtree(
-						dest, sourceProp, destSchema, replaceOldValues, deleteEmptyValues);
+						dest, sourceProp, destSchema, false ,replaceOldValues, deleteEmptyValues);
 				}
 			}
 
@@ -626,143 +633,155 @@ public class XMPUtilsImpl implements XMPConst
 	 * 		   in the destination object.
 	 * @throws XMPException
 	 */
-	private static void appendSubtree(XMPMetaImpl destXMP, XMPNode sourceNode, XMPNode destParent,
+	private static void appendSubtree(XMPMetaImpl destXMP, XMPNode sourceNode, XMPNode destParent, boolean mergeCompound, 
 			boolean replaceOldValues, boolean deleteEmptyValues) throws XMPException
 	{
 		XMPNode destNode = XMPNodeUtils.findChildNode(destParent, sourceNode.getName(), false);
 
 		boolean valueIsEmpty = false;
-		if (deleteEmptyValues)
-		{
-			valueIsEmpty = sourceNode.getOptions().isSimple() ?
+		
+		valueIsEmpty = sourceNode.getOptions().isSimple() ?
 				sourceNode.getValue() == null  ||  sourceNode.getValue().length() == 0 :
 				!sourceNode.hasChildren();
-		}
-
-		if (deleteEmptyValues  &&  valueIsEmpty)
-		{
-			if (destNode != null)
-			{
+		
+		
+		if(valueIsEmpty){
+			if ( deleteEmptyValues && (destNode != null) ) {
 				destParent.removeChild(destNode);
 			}
+			return; // ! Done, empty values are either ignored or cause deletions.
 		}
-		else if (destNode == null)
+		
+		if (destNode == null)
 		{
 			// The one easy case, the destination does not exist.
-			destParent.addChild((XMPNode) sourceNode.clone());
+			XMPNode tempNode = (XMPNode) sourceNode.clone(true);
+			if(tempNode != null)
+				destParent.addChild(tempNode);
+			return;
 		}
-		else if (replaceOldValues)
+		
+		PropertyOptions sourceForm = sourceNode.getOptions();
+		
+		boolean replaceThis = replaceOldValues;	// ! Don't modify replaceOld, it gets passed to inner calls.
+		if ( mergeCompound && (! sourceForm.isSimple()) ) {
+			replaceThis = false;
+		}
+		
+		if (replaceThis)
 		{
 			// The destination exists and should be replaced.
-			destXMP.setNode(destNode, sourceNode.getValue(), sourceNode.getOptions(), true);
+		//	destXMP.setNode(destNode, sourceNode.getValue(), sourceNode.getOptions(), true);
 			destParent.removeChild(destNode);
-			destNode = (XMPNode) sourceNode.clone();
-			destParent.addChild(destNode);
+			//destNode = (XMPNode) sourceNode.clone();
+			XMPNode tempNode = (XMPNode) sourceNode.clone(true);
+			if(tempNode != null)
+				destParent.addChild(tempNode);
+			return;
 		}
-		else
-		{
-			// The destination exists and is not totally replaced. Structs and
-			// arrays are merged.
+		
+		// The destination exists and is not totally replaced. Structs and
+		// arrays are merged.
 
-			PropertyOptions sourceForm = sourceNode.getOptions();
-			PropertyOptions destForm = destNode.getOptions();
-			if (sourceForm != destForm)
+		
+		PropertyOptions destForm = destNode.getOptions();
+		if (sourceForm.getOptions() != destForm.getOptions() || sourceForm.isSimple())
+		{
+			return;
+		}
+		
+		if (sourceForm.isStruct())
+		{
+			// To merge a struct process the fields recursively. E.g. add simple missing fields.
+			// The recursive call to AppendSubtree will handle deletion for fields with empty
+			// values.
+			for (Iterator it = sourceNode.iterateChildren(); it.hasNext();)
 			{
-				return;
-			}
-			if (sourceForm.isStruct())
-			{
-				// To merge a struct process the fields recursively. E.g. add simple missing fields.
-				// The recursive call to AppendSubtree will handle deletion for fields with empty
-				// values.
-				for (Iterator it = sourceNode.iterateChildren(); it.hasNext();)
+				XMPNode sourceField = (XMPNode) it.next();
+				appendSubtree(destXMP, sourceField, destNode, mergeCompound,
+					replaceOldValues, deleteEmptyValues);
+				if (deleteEmptyValues  &&  !destNode.hasChildren())
 				{
-					XMPNode sourceField = (XMPNode) it.next();
-					appendSubtree(destXMP, sourceField, destNode,
-						replaceOldValues, deleteEmptyValues);
-					if (deleteEmptyValues  &&  !destNode.hasChildren())
-					{
-						destParent.removeChild(destNode);
-					}
+					destParent.removeChild(destNode);
 				}
 			}
-			else if (sourceForm.isArrayAltText())
+		}
+		else if (sourceForm.isArrayAltText())
+		{
+			// Merge AltText arrays by the "xml:lang" qualifiers. Make sure x-default is first.
+			// Make a special check for deletion of empty values. Meaningful in AltText arrays
+			// because the "xml:lang" qualifier provides unambiguous source/dest correspondence.
+			for (Iterator it = sourceNode.iterateChildren(); it.hasNext();)
 			{
-				// Merge AltText arrays by the "xml:lang" qualifiers. Make sure x-default is first.
-				// Make a special check for deletion of empty values. Meaningful in AltText arrays
-				// because the "xml:lang" qualifier provides unambiguous source/dest correspondence.
-				for (Iterator it = sourceNode.iterateChildren(); it.hasNext();)
+				XMPNode sourceItem = (XMPNode) it.next();
+				if (!sourceItem.hasQualifier()
+						|| !XMPConst.XML_LANG.equals(sourceItem.getQualifier(1).getName()))
 				{
-					XMPNode sourceItem = (XMPNode) it.next();
-					if (!sourceItem.hasQualifier()
-							|| !XMPConst.XML_LANG.equals(sourceItem.getQualifier(1).getName()))
-					{
-						continue;
-					}
-
-					int destIndex = XMPNodeUtils.lookupLanguageItem(destNode,
-							sourceItem.getQualifier(1).getValue());
-					if (deleteEmptyValues  &&
-							(sourceItem.getValue() == null  ||
-							 sourceItem.getValue().length() == 0))
-					{
-						if (destIndex != -1)
+					continue;
+				}
+				int destIndex = XMPNodeUtils.lookupLanguageItem(destNode,
+					sourceItem.getQualifier(1).getValue());
+				
+				if(sourceItem.getValue() == null || sourceItem.getValue().length() == 0){
+					if ( deleteEmptyValues && (destIndex != -1) ) {
+						destNode.removeChild(destIndex);
+						if (!destNode.hasChildren())
 						{
-							destNode.removeChild(destIndex);
-							if (!destNode.hasChildren())
-							{
-								destParent.removeChild(destNode);
-							}
+							destParent.removeChild(destNode);
 						}
 					}
-					else if (destIndex == -1)
-					{
+				}
+				else {
+					if (destIndex == -1) {
 						// Not replacing, keep the existing item.
 						if (!XMPConst.X_DEFAULT.equals(sourceItem.getQualifier(1).getValue())
-								|| !destNode.hasChildren())
-						{
-							sourceItem.cloneSubtree(destNode);
-						}
-						else
-						{
-							XMPNode destItem = new XMPNode(
-								sourceItem.getName(),
-								sourceItem.getValue(),
-								sourceItem.getOptions());
-							sourceItem.cloneSubtree(destItem);
+								|| !destNode.hasChildren()) {
+							XMPNode tempNode = (XMPNode) sourceItem.clone(true);
+							if (tempNode != null)
+								destNode.addChild(tempNode);
+							// sourceItem.cloneSubtree(destNode);
+						} else {
+							XMPNode destItem = new XMPNode(sourceItem.getName(), sourceItem.getValue(),
+									sourceItem.getOptions());
+							sourceItem.cloneSubtree(destItem, true);
 							destNode.addChild(1, destItem);
 						}
 					}
+					else{
+						if(replaceOldValues)
+							destNode.getChild(destIndex).setValue(sourceItem.getValue());
+					}
 				}
 			}
-			else if (sourceForm.isArray())
-			{
-				// Merge other arrays by item values. Don't worry about order or duplicates. Source
-				// items with empty values do not cause deletion, that conflicts horribly with
-				// merging.
-
+		}
+		else if (sourceForm.isArray())
+		{
+			// Merge other arrays by item values. Don't worry about order or duplicates. Source
+			// items with empty values do not cause deletion, that conflicts horribly with
+			// merging.
 				for (Iterator is = sourceNode.iterateChildren(); is.hasNext();)
-				{
-					XMPNode sourceItem = (XMPNode) is.next();
-
+			{
+				XMPNode sourceItem = (XMPNode) is.next();
 					boolean match = false;
-					for (Iterator id = destNode.iterateChildren(); id.hasNext();)
+				for (Iterator id = destNode.iterateChildren(); id.hasNext();)
+				{
+					XMPNode destItem = (XMPNode) id.next();
+					if (itemValuesMatch(sourceItem, destItem))
 					{
-						XMPNode destItem = (XMPNode) id.next();
-						if (itemValuesMatch(sourceItem, destItem))
-						{
-							match = true;
+						match = true;
+						break;
 						}
 					}
 					if (!match)
 					{
-						destNode = (XMPNode) sourceItem.clone();
-						destParent.addChild(destNode);
+						XMPNode tempNode = (XMPNode) sourceItem.clone(true);
+						if(tempNode != null)
+							destNode.addChild(tempNode);
 					}
 				}
 			}
 		}
-	}
+	
 
 
 	/**
@@ -777,12 +796,12 @@ public class XMPUtilsImpl implements XMPConst
 		PropertyOptions leftForm = leftNode.getOptions();
 		PropertyOptions rightForm = rightNode.getOptions();
 
-		if (leftForm.equals(rightForm))
+		if (!leftForm.equals(rightForm))
 		{
 			return false;
 		}
 
-		if (leftForm.getOptions() == 0)
+		if (leftForm.isSimple())
 		{
 			// Simple nodes, check the values and xml:lang qualifiers.
 			if (!leftNode.getValue().equals(rightNode.getValue()))
@@ -912,7 +931,7 @@ public class XMPUtilsImpl implements XMPConst
 
 				for ( int propNum = 1, propLim = currSchema.getChildrenLength(); propNum <= propLim; ++propNum ) {
 					sourceNode = currSchema.getChild(propNum);
-					destNode.addChild((XMPNode)sourceNode.clone());
+					destNode.addChild((XMPNode)sourceNode.clone(false));
 					
 					/*XMP_Node * copyNode = new XMP_Node ( destNode, sourceNode->name, sourceNode->value, sourceNode->options );
 					destNode->children.push_back ( copyNode );
@@ -938,7 +957,7 @@ public class XMPUtilsImpl implements XMPConst
 			destNode = dstImpl.getRoot();
 			
 			if (  destNode.hasChildren() ) {
-				if ((options != null) && ((options.getOptions() & PropertyOptions.DELETE_EXISTING) != 0)) {
+				if((options != null) && ((options.getOptions() & PropertyOptions.DELETE_EXISTING) != 0)) {
 					destNode.removeChildren();
 				} else {
 					throw new XMPException("Source must be an existing struct", XMPError.BADXPATH);
@@ -967,7 +986,7 @@ public class XMPUtilsImpl implements XMPConst
 					throw new XMPException("Failed to find destination schema", XMPError.BADSCHEMA);
 				}
 				
-				destSchema.addChild((XMPNode)currField.clone());
+				destSchema.addChild((XMPNode)currField.clone(false));
 			}
 		}
 		else{
@@ -994,7 +1013,7 @@ public class XMPUtilsImpl implements XMPConst
 			}
 			destNode.setValue(sourceNode.getValue());
 			destNode.setOptions(sourceNode.getOptions());
-			sourceNode.cloneSubtree(destNode);
+			sourceNode.cloneSubtree(destNode, false);
 		}
 		
 	}
@@ -1352,4 +1371,573 @@ public class XMPUtilsImpl implements XMPConst
 	 * U+2029, paragraph separator.
 	 */
 	private static final String CONTROLS = "\u2028\u2029";
+	
+	/**
+	 * Moves the specified Property from one Meta to another.
+	 *
+	 * @param stdXMP
+	 *            Meta Object from where the property needs to move
+	 * @param extXMP
+	 *            Meta Object to where the property needs to move
+	 * @param schemaURI
+	 *           	Schema of the specified property
+	 * @param propName
+	 *           	Name of the property           
+	 *            
+	 * @return true in case of  success otherwise false.
+	 * 
+	 * @throws XMPException in case of failure
+	 */
+	
+	static boolean moveOneProperty(XMPMetaImpl stdXMP, XMPMetaImpl extXMP, String schemaURI, String propName)
+			throws XMPException {
+
+		XMPNode propNode = null;
+
+		XMPNode stdSchema = XMPNodeUtils.findSchemaNode(stdXMP.getRoot(), schemaURI, false);
+		if (stdSchema != null) {
+			propNode = XMPNodeUtils.findChildNode(stdSchema, propName, false);
+		}
+		if (propNode == null)
+			return false;
+
+		XMPNode extSchema = XMPNodeUtils.findSchemaNode(extXMP.getRoot(), schemaURI, true);
+
+		propNode.setParent(extSchema);
+
+		extSchema.setImplicit(false);
+		extSchema.addChild(propNode);
+
+		stdSchema.removeChild(propNode);
+
+		if (stdSchema.hasChildren() == false) {
+			XMPNode xmpTree = stdSchema.getParent();
+			xmpTree.removeChild(stdSchema);
+		}
+
+		return true;
+	}
+	
+	/**
+	 * estimates the size of an xmp node
+	 *
+	 * @param xmpNode
+	 *            XMP Node Object   
+	 *            
+	 * @return the estimated size of the node
+	 * 
+	 */
+	static int estimateSizeForJPEG(XMPNode xmpNode) {
+		int estSize = 0;
+		int nameSize = xmpNode.getName().length();
+
+		boolean includeName = (!xmpNode.getOptions().isArray());
+
+		if (xmpNode.getOptions().isSimple()) {
+
+			if (includeName)
+				estSize += (nameSize + 3); // Assume attribute form.
+			estSize += xmpNode.getValue().length();
+
+		} else if (xmpNode.getOptions().isArray()) {
+
+			// The form of the value portion is:
+			// <rdf:Xyz><rdf:li>...</rdf:li>...</rdf:Xyx>
+			if (includeName)
+				estSize += (2 * nameSize + 5);
+			int arraySize = xmpNode.getChildrenLength();
+			estSize += 9 + 10; // The rdf:Xyz tags.
+			estSize += arraySize * (8 + 9); // The rdf:li tags.
+			for (int i = 1; i <= arraySize; ++i) {
+				estSize += estimateSizeForJPEG(xmpNode.getChild(i));
+			}
+		} else {
+
+			// The form is: <headTag
+			// rdf:parseType="Resource">...fields...</tailTag>
+			if (includeName)
+				estSize += (2 * nameSize + 5);
+			estSize += 25; // The rdf:parseType="Resource" attribute.
+			int fieldCount = xmpNode.getChildrenLength();
+			for (int i = 1; i <= fieldCount; ++i) {
+				estSize += estimateSizeForJPEG(xmpNode.getChild(i));
+			}
+
+		}
+		return estSize;
+	}
+	
+	/**
+	 * Utility function for placing objects in a Map. It behaves like a multi map.
+	 *
+	 * @param multiMap
+	 *            A Map object which takes Integer as a key and list of list of String as value
+	 * @param key
+	 * 			  A Key for the map
+	 * @param stringPair
+	 * 			  A value for the map             
+	 * 
+	 */
+	private static void putObjectsInMultiMap(Map<Integer, List<List<String>>> multiMap, Integer key,
+			List<String> stringPair) {
+		if (multiMap == null)
+			return;
+		List<List<String>> tempList = multiMap.get(key);
+		if (tempList == null) {
+			tempList = new ArrayList<List<String>>();
+			multiMap.put(key, tempList);
+		}
+		tempList.add(stringPair);
+	}
+	
+	/**
+	 * Utility function for retrieving biggest entry in the multimap
+	 * 
+	 * @see estimateSizeForJPEG for size calculation
+	 * 
+	 * @param multiMap
+	 *            A Map object which takes Integer as a key and list of list of String as value
+	 * 
+	 * @return  the list with the maximum size.      
+	 * 
+	 */
+	private static List<String> getBiggestEntryInMultiMap(Map<Integer, List<List<String>>> multiMap) {
+		if (multiMap == null || multiMap.isEmpty())
+			return null;
+
+		List<List<String>> myList = multiMap.get(((TreeMap) multiMap).lastKey());
+		List<String> myList1 = myList.get(0);
+		myList.remove(0);
+		if (myList.isEmpty()) {
+			multiMap.remove(((TreeMap) multiMap).lastKey());
+		}
+		return myList1;
+	}
+	
+	/**
+	 * Utility function for creating esimated size map for different properties of XMP Packet.
+	 * 
+	 * @see packageForJPEG
+	 * 
+	 * @param stdXMP
+	 *            Meta Object whose property sizes needs to calculate.
+	 *  
+	 * @param propSizes
+	 * 			  A treeMap Object which takes Integer as a key and list of list of String as values	                 
+	 * 
+	 */
+	
+	static void createEstimatedSizeMap(XMPMetaImpl stdXMP, Map<Integer, List<List<String>>> propSizes) {
+
+		for (int s = stdXMP.getRoot().getChildrenLength(); s > 0; --s) {
+			XMPNode stdSchema = stdXMP.getRoot().getChild(s);
+			for (int p = stdSchema.getChildrenLength(); p > 0; --p) {
+				XMPNode stdProp = stdSchema.getChild(p);
+				if ((stdSchema.getName().equals(XMPConst.NS_XMP_NOTE))
+						&& (stdProp.getName().equals("xmpNote:HasExtendedXMP")))
+					continue; // ! Don't move xmpNote:HasExtendedXMP.
+
+				int propSize = estimateSizeForJPEG(stdProp);
+				List<String> namePair = new ArrayList<String>();
+				namePair.add(stdSchema.getName());
+				namePair.add(stdProp.getName());
+				putObjectsInMultiMap(propSizes, propSize, namePair);
+			}
+		}
+	}
+	
+	/**
+	 * Utility function for moving the largest property from One XMP Packet to another.
+	 * 
+	 * @see moveOneProperty
+	 * @see packageForJPEG
+	 * 
+	 * @param stdXMP
+	 *            Meta Object from where property moves.
+	 *	
+	 * @param extXMP
+	 *            Meta Object to where property moves.
+	 * 
+	 * @param propSizes
+	 * 			 A treeMap Object which holds the estimated sizes of the property of stdXMP as a key and 
+	 * 			 their string representation as map values.                
+	 * 
+	 */
+	static int moveLargestProperty(XMPMetaImpl stdXMP, XMPMetaImpl extXMP, Map<Integer, List<List<String>>> propSizes)
+			throws XMPException {
+		assert (!propSizes.isEmpty());
+
+		@SuppressWarnings("rawtypes")
+		int propSize = (Integer) ((TreeMap) propSizes).lastKey();
+		List<String> tempList = getBiggestEntryInMultiMap(propSizes);
+		String schemaURI = tempList.get(0);
+		String propName = tempList.get(1);
+
+		boolean moved = moveOneProperty(stdXMP, extXMP, schemaURI, propName);
+		assert (moved);
+		return propSize;
+
+	}
+	
+	/**
+	 * creates XMP serializations appropriate for a JPEG file.
+	 *
+	 * The standard XMP in a JPEG file is limited to 64K bytes. This function
+	 * serializes the XMP metadata in an XMP object into a string of RDF . If
+	 * the data does not fit into the 64K byte limit, it creates a second packet
+	 * string with the extended data.
+	 *
+	 * @param origXMPImpl
+	 *            The XMP object containing the metadata.
+	 *
+	 * @param stdStr
+	 *            A string object in which to return the full standard XMP
+	 *            packet.
+	 *
+	 * @param extStr
+	 *            A string object in which to return the serialized extended
+	 *            XMP, empty if not needed.
+	 *
+	 * @param digestStr
+	 *            A string object in which to return an MD5 digest of the
+	 *            serialized extended XMP, empty if not needed.
+	 * 
+	 * @throws NoSuchAlgorithmException if fail to find algorithm for MD5
+	 * @throws XMPException in case of internal error occurs.
+	 *
+	 */
+
+	public static void packageForJPEG ( XMPMeta origXMPImpl,
+			   StringBuilder stdStr,
+			   StringBuilder extStr,
+			   StringBuilder digestStr ) throws XMPException, NoSuchAlgorithmException
+{
+		XMPMetaImpl origXMP = (XMPMetaImpl) origXMPImpl;
+		assert ( (stdStr != null) && (extStr != null) && (digestStr != null) );	// ! Enforced by wrapper.
+	
+		final int kStdXMPLimit = 65000 ;
+		final String kPacketTrailer = "<?xpacket end=\"w\"?>";
+		final int kTrailerLen = kPacketTrailer.length();
+		
+		String tempStr = null;
+		XMPMetaImpl stdXMP = new XMPMetaImpl();
+		XMPMetaImpl extXMP = new XMPMetaImpl();
+		SerializeOptions keepItSmall = new SerializeOptions(SerializeOptions.USE_COMPACT_FORMAT);
+		keepItSmall.setPadding(1);
+		keepItSmall.setIndent("");
+		keepItSmall.setBaseIndent(0);
+		keepItSmall.setNewline(" ");
+		
+		
+		// Try to serialize everything. Note that we're making internal calls to SerializeToBuffer, so
+		// we'll be getting back the pointer and length for its internal string.
+		
+		
+		tempStr = XMPMetaFactory.serializeToString(origXMP,keepItSmall);
+		
+		if ( tempStr.length() > kStdXMPLimit ) {
+		
+			// Couldn't fit everything, make a copy of the input XMP and make sure there is no xmp:Thumbnails property.
+			
+			stdXMP.getRoot().setOptions(origXMP.getRoot().getOptions()) ;
+			stdXMP.getRoot().setName(origXMP.getRoot().getName()) ;
+			stdXMP.getRoot().setValue(origXMP.getRoot().getValue()); 
+			
+			origXMP.getRoot().cloneSubtree(stdXMP.getRoot(), false); 
+		
+			if ( stdXMP.doesPropertyExist ( XMPConst.NS_XMP, "Thumbnails" ) ) {
+				stdXMP.deleteProperty ( XMPConst.NS_XMP, "Thumbnails" );
+				tempStr = XMPMetaFactory.serializeToString(stdXMP,keepItSmall);
+			}
+	
+		}
+	
+	if ( tempStr.length() > kStdXMPLimit ) {
+	
+		// Still doesn't fit, move all of the Camera Raw namespace. Add a dummy value for xmpNote:HasExtendedXMP.
+	
+		stdXMP.setProperty ( XMPConst.NS_XMP_NOTE, "HasExtendedXMP", "123456789-123456789-123456789-12", 
+				new PropertyOptions(PropertyOptions.NO_OPTIONS));
+	
+		
+		XMPNode crSchema = XMPNodeUtils.findSchemaNode(stdXMP.getRoot(), XMPConst.NS_CAMERARAW, false);
+		
+		if ( crSchema != null ) {
+			crSchema.setParent(extXMP.getRoot());
+			extXMP.getRoot().addChild(crSchema);
+			stdXMP.getRoot().removeChild(crSchema);
+			
+			tempStr = XMPMetaFactory.serializeToString(stdXMP,keepItSmall);
+		}
+	
+	}
+	
+	if ( tempStr.length() > kStdXMPLimit ) {
+	
+		// Still doesn't fit, move photoshop:History.
+	
+		boolean moved = moveOneProperty ( stdXMP, extXMP, XMPConst.NS_PHOTOSHOP, "photoshop:History" );
+	
+		if ( moved ) {
+			tempStr = XMPMetaFactory.serializeToString(stdXMP,keepItSmall);
+		}
+	
+	}
+	
+	if ( tempStr.length() > kStdXMPLimit ) {
+	
+		// Still doesn't fit, move top level properties in order of estimated size. This is done by
+		// creating a multi-map that maps the serialized size to the string pair for the schema URI
+		// and top level property name. Since maps are inherently ordered, a reverse iteration of
+		// the map can be done to move the largest things first. We use a double loop to keep going
+		// until the serialization actually fits, in case the estimates are off.
+	
+		Map<Integer,List<List<String>>> propSizes = new TreeMap<Integer,List<List<String>>>();
+		createEstimatedSizeMap ( stdXMP, propSizes );
+		
+		// Outer loop to make sure enough is actually moved.
+	
+		while ( (tempStr.length() > kStdXMPLimit) && (! propSizes.isEmpty()) ) {
+	
+			// Inner loop, move what seems to be enough according to the estimates.
+	
+			int tempLen = tempStr.length();
+			while ( (tempLen > kStdXMPLimit) && (! propSizes.isEmpty()) ) {
+	
+				int propSize = moveLargestProperty ( stdXMP, extXMP, propSizes );
+				assert ( propSize > 0 );
+			
+				if ( propSize > tempLen ) propSize = tempLen;	// ! Don't go negative.
+				tempLen -= propSize;
+	
+			}
+	
+			// Reserialize the remaining standard XMP.
+	
+			tempStr = XMPMetaFactory.serializeToString(stdXMP,keepItSmall);	
+		}
+	
+	}
+	
+	if ( tempStr.length() > kStdXMPLimit ) {
+		// Still doesn't fit, throw an exception and let the client decide what to do.
+		// ! This should never happen with the policy of moving any and all top level properties.
+			throw new XMPException( "Can't reduce XMP enough for JPEG file", XMPError.INTERNALFAILURE );
+	}
+	
+	// Set the static output strings.
+	
+	if ( extXMP.getRoot().getChildrenLength() == 0 ) {
+	
+		// Just have the standard XMP.
+		stdStr.append(tempStr);
+		
+	
+	} else {
+	
+		// Have extended XMP. Serialize it, compute the digest, reset xmpNote:HasExtendedXMP, and
+		// reserialize the standard XMP.
+	
+		
+		tempStr = XMPMetaFactory.serializeToString(extXMP,
+				new SerializeOptions(SerializeOptions.USE_COMPACT_FORMAT | SerializeOptions.OMIT_PACKET_WRAPPER));
+		
+		extStr.append(tempStr);
+		
+		MessageDigest md = MessageDigest.getInstance("MD5");
+	    md.update(tempStr.getBytes());
+	    
+	    byte byteData[] = md.digest();
+	    
+        for (int i = 0; i < byteData.length; i++) {
+        	digestStr.append(Integer.toString((byteData[i] & 0xff) + 0x100, 16).substring(1));
+        }
+	
+        stdXMP.setProperty ( XMPConst.NS_XMP_NOTE, "HasExtendedXMP", digestStr.toString(), 
+        		new PropertyOptions(PropertyOptions.NO_OPTIONS));
+        tempStr = XMPMetaFactory.serializeToString(stdXMP,keepItSmall);
+        stdStr.append(tempStr);
+	}
+	
+		// Adjust the standard XMP padding to be up to 2KB.
+		
+		assert ( (stdStr.length() > kTrailerLen) && (stdStr.length() <= kStdXMPLimit) );		
+		
+		
+		int extraPadding = kStdXMPLimit - stdStr.length();	// ! Do this before erasing the trailer.
+		if ( extraPadding > 2047 ) extraPadding = 2047;
+		stdStr.delete(stdStr.toString().indexOf(kPacketTrailer),stdStr.length());
+		
+		for(int i = 0; i < extraPadding; ++i) {
+			stdStr.append(' ');
+		}
+		
+		stdStr.append(kPacketTrailer).toString();	
+	}
+	
+	/**
+	 * merges standard and extended XMP retrieved from a JPEG file.
+	 *
+	 * When an extended partition stores properties that do not fit into the
+	 * JPEG file limitation of 64K bytes, this function integrates those
+	 * properties back into the same XMP object with those from the standard XMP
+	 * packet.
+	 *
+	 * @param fullXMP
+	 *            An XMP object which the caller has initialized from the
+	 *            standard XMP packet in a JPEG file. The extended XMP is added
+	 *            to this object.
+	 *
+	 * @param extendedXMP
+	 *            An XMP object which the caller has initialized from the
+	 *            extended XMP packet in a JPEG file.
+	 *
+	 * @throws XMPException
+	 *             in case of internal error occurs.
+	 */
+	public static void mergeFromJPEG ( XMPMeta fullXMP,
+	                          XMPMeta extendedXMP ) throws XMPException
+	{
+
+		TemplateOptions flags = new TemplateOptions(TemplateOptions.REPLACE_EXISTING_PROPERTIES |TemplateOptions.INCLUDE_INTERNAL_PROPERTIES);
+		applyTemplate ( (XMPMetaImpl)fullXMP, (XMPMetaImpl)extendedXMP, flags );
+		fullXMP.deleteProperty ( XMPConst.NS_XMP_NOTE, "HasExtendedXMP" );
+
+	}
+	
+	
+	/**
+	 * modifies a working XMP object according to a template object.
+	 *
+	 * The XMP template can be used to add, replace or delete properties from
+	 * the working XMP object. The actions that you specify determine how the
+	 * template is applied. Each action can be applied individually or combined;
+	 * if you do not specify any actions, the properties and values in the
+	 * working XMP object do not change.
+	 *
+	 * @param OrigXMP
+	 *            The destination XMP object.
+	 *
+	 * @param tempXMP
+	 *            The template to apply to the destination XMP object.
+	 *
+	 * @param actions
+	 *            Option flags to control the copying. If none are specified,
+	 *            the properties and values in the working XMP do not change. A
+	 *            logical OR of these bit-flag constants:
+	 *            <ul>
+	 *            <li><code> CLEAR_UNNAMED_PROPERTIES </code> Delete anything
+	 *            that is not in the template.
+	 *            <li><code> ADD_NEW_PROPERTIES </code> Add properties; see
+	 *            detailed description.
+	 *            <li><code> REPLACE_EXISTING_PROPERTIES </code> Replace the
+	 *            values of existing properties.
+	 *            <li><code> REPLACE_WITH_DELETE_EMPTY </code> Replace the
+	 *            values of existing properties and delete properties if the new
+	 *            value is empty.
+	 *            <li><code> INCLUDE_INTERNAL_PROPERTIES </code> Operate on
+	 *            internal properties as well as external properties.
+	 *            </ul>
+	 *
+	 * @throws XMPException
+	 *             in case of internal error occurs.
+	 */
+	
+	static public void applyTemplate(XMPMeta OrigXMP, XMPMeta tempXMP, TemplateOptions actions) throws XMPException {
+
+		XMPMetaImpl workingXMP = (XMPMetaImpl) OrigXMP;
+		XMPMetaImpl templateXMP = (XMPMetaImpl) tempXMP;
+
+		boolean doClear = (actions.getOptions() & TemplateOptions.CLEAR_UNNAMED_PROPERTIES) != 0;
+		boolean doAdd = (actions.getOptions() & TemplateOptions.ADD_NEW_PROPERTIES) != 0;
+		boolean doReplace = (actions.getOptions() & TemplateOptions.REPLACE_EXISTING_PROPERTIES) != 0;
+
+		boolean deleteEmpty = (actions.getOptions() & TemplateOptions.REPLACE_WITH_DELETE_EMPTY) != 0;
+		doReplace |= deleteEmpty; // Delete-empty implies Replace.
+		deleteEmpty &= (!doClear); // Clear implies not delete-empty, but keep
+									// the implicit Replace.
+
+		boolean doAll = (actions.getOptions() & TemplateOptions.INCLUDE_INTERNAL_PROPERTIES) != 0;
+
+		// ! In several places we do loops backwards so that deletions do not
+		// perturb the remaining indices.
+		// ! These loops use ordinals (size .. 1), we must use a zero based
+		// index inside the loop.
+
+		if (doClear) {
+
+			// Visit the top level working properties, delete if not in the
+			// template.
+
+			for (int schemaOrdinal = workingXMP.getRoot().getChildrenLength(); schemaOrdinal > 0; --schemaOrdinal) {
+				XMPNode workingSchema = workingXMP.getRoot().getChild(schemaOrdinal);
+				XMPNode templateSchema = XMPNodeUtils.findSchemaNode(templateXMP.getRoot(), workingSchema.getName(),
+						false);
+
+				if (templateSchema == null) {
+
+					// The schema is not in the template, delete all properties
+					// or just all external ones.
+
+					if (doAll) {
+						workingSchema.removeChildren(); // Remove the properties here, delete the schema below.
+					} else {
+						for (int propOrdinal = workingSchema.getChildrenLength(); propOrdinal > 0; --propOrdinal) {
+							XMPNode workingProp = workingSchema.getChild(propOrdinal);
+							if (!Utils.isInternalProperty(workingSchema.getName(), workingProp.getName())) {
+								workingSchema.removeChild(propOrdinal);
+							}
+						}
+					}
+
+				} else {
+					// Check each of the working XMP's properties to see if it is in the template.
+					for (int propOrdinal = workingSchema.getChildrenLength(); propOrdinal > 0; --propOrdinal) {
+						XMPNode workingProp = workingSchema.getChild(propOrdinal);
+						if ((doAll || !Utils.isInternalProperty(workingSchema.getName(), workingProp.getName()))
+								&& (XMPNodeUtils.findChildNode(templateSchema, workingProp.getName(), false) == null)) {
+							workingSchema.removeChild(propOrdinal);
+						}
+					}
+				}
+				if (workingSchema.hasChildren() == false) {
+					workingXMP.getRoot().removeChild(schemaOrdinal);
+				}
+			}
+		}
+
+		if (doAdd | doReplace) {
+
+			for (int schemaNum = 0, schemaLim = templateXMP.getRoot()
+					.getChildrenLength(); schemaNum < schemaLim; ++schemaNum) {
+
+				XMPNode templateSchema = templateXMP.getRoot().getChild(schemaNum + 1);
+
+				// Make sure we have an output schema node, then process the top level template properties.
+
+				XMPNode workingSchema = XMPNodeUtils.findSchemaNode(workingXMP.getRoot(), templateSchema.getName(),
+						false);
+				if (workingSchema == null) {
+					workingSchema = new XMPNode(templateSchema.getName(), templateSchema.getValue(),
+							new PropertyOptions(PropertyOptions.SCHEMA_NODE));
+					workingXMP.getRoot().addChild(workingSchema);
+					workingSchema.setParent(workingXMP.getRoot());
+				}
+
+				for (int propNum = 1, propLim = templateSchema.getChildrenLength(); propNum <= propLim; ++propNum) {
+					XMPNode templateProp = templateSchema.getChild(propNum);
+					if (doAll || !Utils.isInternalProperty(templateSchema.getName(), templateProp.getName())) {
+						appendSubtree(workingXMP, templateProp, workingSchema, doAdd, doReplace, deleteEmpty);
+					}
+				}
+
+				if (workingSchema.hasChildren() == false) {
+					workingXMP.getRoot().removeChild(workingSchema);
+				}
+
+			}
+
+		}
+	}
+
 }

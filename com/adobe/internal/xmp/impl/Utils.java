@@ -10,6 +10,9 @@
 package com.adobe.internal.xmp.impl;
 
 
+import java.util.HashSet;
+import java.util.Set;
+
 import com.adobe.internal.xmp.XMPConst;
 
 
@@ -150,7 +153,44 @@ public class Utils implements XMPConst
 		return new String[] { name, value.toString() };
 	}
 
-
+	static Set<String> EXTERNAL_XMPDM_PROPS = new HashSet<String>(){{
+		add("xmpDM:album");
+		add( "xmpDM:altTapeName");
+		add("xmpDM:altTimecode");
+		add("xmpDM:artist");
+		add("xmpDM:cameraAngle");
+		add("xmpDM:cameraLabel");
+		add("xmpDM:cameraModel");
+		add("xmpDM:cameraMove");
+		add("xmpDM:client");
+		add("xmpDM:comment");
+		add("xmpDM:composer");
+		add("xmpDM:director");
+		add( "xmpDM:directorPhotography");
+		add("xmpDM:engineer");
+		add( "xmpDM:genre");
+		add( "xmpDM:good");
+		add("xmpDM:instrument");
+		add( "xmpDM:logComment");
+		add("xmpDM:projectName");
+		add("xmpDM:releaseDate");
+		add("xmpDM:scene");
+		add("xmpDM:shotDate");
+		add("xmpDM:shotDay");
+		add("xmpDM:shotLocation");		
+		add("xmpDM:shotName");
+		add("xmpDM:shotNumber");
+		add("xmpDM:shotSize");
+		add("xmpDM:speakerPlacement");
+		add("xmpDM:takeNumber");
+		add("xmpDM:tapeName");
+		add("xmpDM:trackNumber");
+		add("xmpDM:videoAlphaMode");
+		add("xmpDM:videoAlphaPremultipleColor");
+	}};
+	
+	
+	
 	/**
 	 *
 	 * @param schema
@@ -212,18 +252,28 @@ public class Utils implements XMPConst
 		}
 		else if (NS_PHOTOSHOP.equals(schema))
 		{
-			if ("photoshop:ICCProfile".equals(prop))
+			if ("photoshop:ICCProfile".equals(prop) || "photoshop:TextLayers".equals(prop))
 			{
 				isInternal = true;
 			}
 		}
+		else if(NS_DM.equals(schema)){
+			isInternal = ! EXTERNAL_XMPDM_PROPS.contains(prop);
+		}
 		else if (NS_CAMERARAW.equals(schema))
 		{
-			if ("crs:Version".equals(prop) || "crs:RawFileName".equals(prop)
-					|| "crs:ToneCurveName".equals(prop))
-			{
+			isInternal = true;
+		}
+		else if(NS_SCRIPT.equals(schema)){
+			isInternal = true;
+			if(("xmpScript:action".equals(prop)) || ("xmpScript:character".equals(prop))
+					||("xmpScript:dialog".equals(prop))||("xmpScript:sceneSetting".equals(prop))
+					||("xmpScript:sceneTimeOfDay".equals(prop)))
+				isInternal = false;
+		}
+		else if(NS_BWF.equals(schema)){
+			if("bext:version".equals(prop))
 				isInternal = true;
-			}
 		}
 		else if (NS_ADOBESTOCKPHOTO.equals(schema))
 		{
