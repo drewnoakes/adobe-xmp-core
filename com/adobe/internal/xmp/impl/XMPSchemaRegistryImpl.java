@@ -494,6 +494,7 @@ public final class XMPSchemaRegistryImpl implements XMPSchemaRegistry, XMPConst
 		registerAlias(NS_TIFF, "Artist", NS_DC, "creator", aliasToArrayOrdered);
 		registerAlias(NS_TIFF, "Copyright", NS_DC, "rights", null);
 		registerAlias(NS_TIFF, "DateTime", NS_XMP, "ModifyDate", null);
+		registerAlias(NS_EXIF, "DateTimeDigitized", NS_XMP, "CreateDate", null );
 		registerAlias(NS_TIFF, "ImageDescription", NS_DC, "description", null);
 		registerAlias(NS_TIFF, "Software", NS_XMP, "CreatorTool", null);
 
